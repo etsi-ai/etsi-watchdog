@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Drift Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 2rem; color: #333; }
+    h1, h2 { color: #2c3e50; }
+    .table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    .table th, .table td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    .table th { background-color: #f0f0f0; }
+    .alert { color: red; font-weight: bold; }
+    img { margin-bottom: 20px; border: 1px solid #ddd; box-shadow: 2px 2px 5px rgba(0,0,0,0.1); }
+  </style>
+</head>
+<body>
+
+  <h1>Executive Summary</h1>
+  <p>{{ summary }}</p>
+
+  <h2>Metadata</h2>
+  <ul>
+    {% for key, value in metadata.items() %}
+      <li><strong>{{ key }}:</strong> {{ value }}</li>
+    {% endfor %}
+  </ul>
+
+  <h2>Drift Overview Table</h2>
+  {{ drift_table|safe }}
+
+  <h2>Significant Drift Alerts</h2>
+  {% if alerts %}
+    <ul>
+      {% for alert in alerts %}
+        <li class="alert">{{ alert }}</li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>No significant drift detected.</p>
+  {% endif %}
+
+  <h2>Visualizations</h2>
+  {% for plot in plots %}
+    <img src="data:image/png;base64,{{ plot }}" alt="Feature Drift Plot" width="600"/>
+  {% endfor %}
+
+</body>
+</html>
