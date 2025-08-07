@@ -1,44 +1,69 @@
 # etsi/watchdog/cli.py
 
-import argparse
-import pandas as pd
-from . import DriftCheck
-from .report.generate import generate_drift_report  
+import click
+import os
+from .config.parser import ConfigParser
+from .config.runner import ConfigRunner
+from .config.schema import DriftConfig, AlgorithmConfig, OutputConfig
 
+@click.group()
+def cli():
+    """etsi-watchdog: A tool for real-time data drift detection."""
+    pass
 
-def run_cli():
-    parser = argparse.ArgumentParser(description="ETSI Drift Watchdog CLI")
-
-    parser.add_argument("--ref", required=True, help="Path to reference CSV file")
-    parser.add_argument("--live", required=True, help="Path to live CSV file")
-    parser.add_argument("--features", nargs="+", help="List of features to check")
-    parser.add_argument("--algo", default="psi", help="Drift algorithm (default: psi)")
-    parser.add_argument("--threshold", type=float, default=0.2, help="Drift threshold (default: 0.2)")
-    parser.add_argument("--out", help="Base output filename (used for JSON or report)")
+@cli.command(name="from-config")
+@click.option('--config', '-c', required=True, type=click.Path(exists=True, dir_okay=False), help="Path to the YAML configuration file.")
+def from_config_command(config):
+    """Run drift detection from a YAML configuration file."""
+    print(f"Loading configuration from: {config}")
+    parser = ConfigParser()
+    config_obj = parser.load_config(config)
     
-    # New optional flag for report generation
-    parser.add_argument("--report", choices=["pdf", "html"], help="Generate a visual drift report (pdf or html)")
+    runner = ConfigRunner()
+    runner.run(config_obj) 
+    print("✅ Done.")
 
-    args = parser.parse_args()
+@cli.command(name="detect")
+@click.option('--ref', required=True, type=click.Path(exists=True), help="Path to reference CSV.")
+@click.option('--current', required=True, type=click.Path(exists=True), help="Path to current CSV.")
+@click.option('--features', required=True, type=str, help="Comma-separated list of features.")
+@click.option('--output-path', default="drift_report", help="Base path for the output report (e.g., 'drift_report').")
+@click.option('--algo', default="psi", help="Drift algorithm (e.g., psi, ks).")
+@click.option('--threshold', default=0.2, type=float, help="Drift threshold.")
+@click.option('--report', type=click.Choice(['pdf', 'html']), help="Generate a visual report in the specified format instead of JSON.")
+def detect_command(ref, current, features, output_path, algo, threshold, report):
+    """Run a quick drift detection with direct arguments."""
+    print("Building configuration from CLI arguments...")
 
-    ref_df = pd.read_csv(args.ref)
-    live_df = pd.read_csv(args.live)
-
-    checker = DriftCheck(ref_df, algorithm=args.algo, threshold=args.threshold)
-    results = checker.run(live_df, features=args.features or list(ref_df.columns))
-
-    if args.report:
-        # Generate the full visual report
-        out_path = f"{args.out or 'drift_report'}.{args.report}"
-        generate_drift_report(ref_df, live_df, results, path=out_path, format=args.report)
-        print(f"\n✅ Drift report generated at: {out_path}")
+    # Determine output configuration based on the --report flag
+    if report:
+        # User requested a visual report (pdf or html)
+        output_format = report
+        final_output_path = f"{output_path}.{report}"
+        visualizations = True
     else:
-        # Default: print or export JSON
-        for feat, res in results.items():
-            print(f"\n{feat} ➤ {res.summary()}")
-            if args.out:
-                res.to_json(f"{args.out}_{feat}.json")
+        # Default to JSON output
+        output_format = "json"
+        final_output_path = f"{output_path}.json"
+        visualizations = False
 
+    # Create the configuration object for the runner
+    drift_config = DriftConfig(
+        reference_data=ref,
+        current_data=current,
+        features=[f.strip() for f in features.split(',')],
+        algorithms=[AlgorithmConfig(name=algo, threshold=threshold)],
+        output=OutputConfig(
+            format=output_format, 
+            path=final_output_path, 
+            visualizations=visualizations
+        ),
+        monitoring=None 
+    )
+
+    runner = ConfigRunner()
+    runner.run(drift_config) 
+    print(f"✅ Report generated at: {final_output_path}")
 
 if __name__ == "__main__":
-    run_cli()
+    cli()

@@ -1,0 +1,15 @@
+drift_detection:
+  reference_data: "data/reference.csv"
+  current_data: "data/live.csv"
+  features:
+    - "age"
+    - "salary"
+  
+  algorithms:
+    - name: "psi"
+      threshold: 0.2
+  
+  output:
+    format: "json"
+    path: "config_drift_report.json"
+    visualizations: false

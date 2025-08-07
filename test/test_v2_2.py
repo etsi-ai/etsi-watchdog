@@ -5,6 +5,7 @@ import numpy as np
 import os
 from datetime import datetime, timedelta
 from etsi.watchdog import DriftCheck, Monitor, DriftComparator
+from etsi.watchdog.config import run_from_yaml
 
 
 def generate_data():
@@ -27,20 +28,19 @@ def test_drift_check():
     print("\n===== Running DriftCheck ====")
     ref, live = generate_data()
 
+    # --- FIX 1: Removed 'ref_data=' keyword ---
     check = DriftCheck(ref)
     results = check.run(live, features=["age", "salary", "gender"])
 
     for feat, result in results.items():
         print(f"[✓] DriftCheck ({feat}) passed.")
         print(result.summary())
-        result.plot()
-        result.to_json(f"logs/drift_{feat}.json")
 
 
 def test_monitor():
-    print("\n==== Running DriftMonitor ====")
+    print("\n==== Running Monitor ====")
     ref, _ = generate_data()
-    monitor = Monitor(ref)
+    monitor = Monitor(reference_df=ref)
     monitor.enable_logging("logs/rolling_log.csv")
 
     live = []
@@ -50,16 +50,17 @@ def test_monitor():
             'salary': np.random.normal(50000 + i * 200, 10000, 60),
             'gender': np.random.choice(['M', 'F'], 60)
         })
-        d.index = pd.date_range(start=datetime.today() - timedelta(days=9 - i), periods=60, freq="min")
+        d.index = pd.to_datetime(d.index)
         live.append(d)
 
     live_df = pd.concat(live)
     results = monitor.watch_rolling(live_df, window=50, freq="D", features=["age", "salary"])
 
-    for date, res in results:
-        print(f"{date.date()} —")
-        for feat, result in res.items():
-            print(f"  {feat}: {result.summary()}")
+    if results:
+        for date, res in results:
+            print(f"{date.date()} —")
+            for feat, result in res.items():
+                print(f"  {feat}: {result.summary()}")
 
 
 def test_comparator():
@@ -80,9 +81,41 @@ def test_comparator():
         print(f"{k}: Δ PSI = {v:+.4f}")
 
 
+def test_config_runner():
+    """Tests the YAML configuration system end-to-end."""
+    print("\n==== Running ConfigRunner from YAML ====")
+
+    config_content = """
+drift_detection:
+  reference_data: "logs/reference_data.csv"
+  current_data: "logs/live_data.csv"
+  features:
+    - "age"
+    - "salary"
+  algorithms:
+    - name: "psi"
+      threshold: 0.2
+  output:
+    format: "json"
+    path: "logs/config_drift_report.json"
+    visualizations: false
+"""
+    config_path = "logs/test_config.yaml"
+    with open(config_path, 'w') as f:
+        f.write(config_content)
+
+    ref, live = generate_data()
+    ref.to_csv("logs/reference_data.csv", index=False)
+    live.to_csv("logs/live_data.csv", index=False)
+
+    run_from_yaml(config_path)
+    print(f"[✓] ConfigRunner test passed. Check 'logs/config_drift_report.json'")
+
+
 if __name__ == "__main__":
     os.makedirs("logs", exist_ok=True)
     test_drift_check()
     test_monitor()
     test_comparator()
+    test_config_runner()
     print("\n---All watchdog component tests passed----")

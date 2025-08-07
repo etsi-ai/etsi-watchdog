@@ -1,12 +1,21 @@
 [project]
 name = "etsi-watchdog"
-version = "0.2.2"
+version = "0.2.2" 
 description = "Real-time data drift detection for machine learning pipelines."
 authors = [{name = "Etsi", email = "etsi.hq@gmail.com"}]
 license = {text = "BSD-2-Clause"}
-dependencies = ["pandas", "numpy", "slack_sdk"]
+dependencies = [
+    "pandas",
+    "numpy", "slack_sdk",
+    "PyYAML",   # Added for parsing config.yaml files
+    "click",    # Added for the command-line interface (CLI)
+    "scipy"     # Added for statistical tests like KS-test
+]
 readme = "PYPIREADME.md"
 requires-python = ">=3.8"
+# This section creates the command-line tool
+[project.scripts]
+etsi-watchdog = "etsi.watchdog.cli:cli"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
