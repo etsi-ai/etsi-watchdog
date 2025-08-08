@@ -1,5 +1,3 @@
-# etsi/watchdog/drift/factory.py
-
 from .tree_drift import TreeDrift
 from .psi import psi_drift
 from .ks import ks_drift
