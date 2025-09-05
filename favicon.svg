@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <ellipse cx="16" cy="16" rx="14" ry="10" fill="#90caf9"/>
+  <ellipse cx="16" cy="16" rx="9" ry="6" fill="#e3f2fd"/>
+  <text x="16" y="21" text-anchor="middle" fill="#0d47a1" font-size="10" font-family="Arial">ETSI</text>
+</svg>
