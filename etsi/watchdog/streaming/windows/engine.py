@@ -86,7 +86,15 @@ class WindowEngine:
             key = (ev.stream_id, f, ws)
             if key not in self.open_windows:
                 ref_prof = self.references[f]
-                self.open_windows[key] = self.stat_factory(ref_prof.buckets, ref_prof.edges_list)
+                if hasattr(self.stat_factory, "create_stat"):
+                    self.open_windows[key] = self.stat_factory.create_stat(
+                        ref_prof=ref_prof,
+                        stream_id=ev.stream_id,
+                        feature=f,
+                        window_start=ws,
+                    )
+                else:
+                    self.open_windows[key] = self.stat_factory(ref_prof.buckets, ref_prof.edges_list)
 
             self.open_windows[key].update(float(val))
             self.dirty.add(key)
