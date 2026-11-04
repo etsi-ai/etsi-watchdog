@@ -17,6 +17,13 @@ dependencies = [
 readme = "README.md"
 requires-python = ">=3.8"
 
+[project.optional-dependencies]
+streaming = [
+    "confluent-kafka>=2.0.0",
+    "redis>=5.0.0",
+    "msgpack>=1.0.0"
+]
+
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
