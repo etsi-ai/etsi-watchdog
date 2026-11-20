@@ -1,25 +1,27 @@
 # etsi/watchdog/streaming/streaming_monitor.py
 
-import time
 import os
+import time
+from typing import Dict, Optional, Set, Tuple, Any
 import pandas as pd
-from typing import Optional, Dict, Set, Tuple
 from etsi.watchdog.drift.factory import get_drift_function
 from etsi.watchdog.slack_notifier import SlackNotifier
 from .config import StreamingConfig
-from .source import EventSource, RawMessage
-from .state.base import StateStore
-from .stats.reference import ReferenceProfile
-from .windows.engine import WindowEngine, Event
-from .events import parse_and_validate, Reject
+from .events import parse_and_validate, Event, Reject
 from .metrics import StreamingMetrics
+from .source import EventSource
+from .state.base import StateStore
+from .state.lease import RedisOwnerLease
+from .stats.reference import ReferenceProfile
+from .windows.engine import WindowEngine
 from .alerts import AlertDispatcher
+from .checkpoint import CheckpointWriter
 
 
 class StreamingMonitor:
     """
-    Streaming drift monitor orchestrating consumer source -> window engine -> state -> alerts (D-12, Task 5.1).
-    Structurally parallel to batch Monitor, designed for continuous event stream ingestion.
+    Streaming drift monitor orchestrating Kafka consumer, window engine,
+    state persistence, and alert dispatch (Task 5.1, D-12).
     """
 
     def __init__(
@@ -29,6 +31,7 @@ class StreamingMonitor:
         store: StateStore,
         notifier: Optional[SlackNotifier] = None,
         references: Optional[Dict[str, ReferenceProfile]] = None,
+        lease: Optional[RedisOwnerLease] = None,
     ):
         self.config: StreamingConfig = config
         self.config.validate()
@@ -36,6 +39,7 @@ class StreamingMonitor:
         self.source: EventSource = source
         self.store: StateStore = store
         self.notifier: Optional[SlackNotifier] = notifier
+        self.lease: Optional[RedisOwnerLease] = lease
         self.metrics: StreamingMetrics = StreamingMetrics()
 
         # 1. Resolve Reference Profiles
@@ -69,6 +73,16 @@ class StreamingMonitor:
             log_path=self.config.log_path,
             notifier=self.notifier,
             metrics=self.metrics,
+        )
+
+        # 5. Initialize Atomic Checkpoint Writer (D-6)
+        lease_token = self.lease.token if self.lease else getattr(self.store, "owner_token", None)
+        self.checkpoint_writer = CheckpointWriter(
+            group=self.config.group,
+            store=self.store,
+            engine=self.engine,
+            dispatcher=self.dispatcher,
+            lease_token=lease_token,
         )
 
         # State tracking
@@ -105,32 +119,24 @@ class StreamingMonitor:
 
     def checkpoint(self, reason: str = "interval") -> None:
         """
-        Execute checkpoint.
-        In Milestone 1, flushes pending markers to dispatcher, commits offsets, and clears dirty sets.
-        Milestone 2 upgrades this to an atomic CheckpointWriter across the StateStore.
+        Execute atomic Checkpoint-then-Commit across StateStore and Kafka (D-6).
         """
-        t0 = time.perf_counter()
-
-        if self.engine.pending_markers:
-            markers = list(self.engine.pending_markers)
-            self.engine.pending_markers.clear()
-            self.dispatcher.enqueue(markers)
-
-        self.engine.dirty.clear()
-        self.engine.dirty_streams.clear()
-        self.engine.flushed.clear()
-
-        # Advisory commit to message source
-        if self.offsets:
-            self.source.commit(self.offsets)
-
+        res = self.checkpoint_writer.checkpoint(
+            offsets=self.offsets,
+            source=self.source,
+            reason=reason,
+        )
         self.events_since_checkpoint = 0
         self.last_checkpoint_ts = time.time()
         self.metrics.checkpoints += 1
-        self.metrics.checkpoint_ms_last = (time.perf_counter() - t0) * 1000.0
+        self.metrics.checkpoint_ms_last = res["elapsed_ms"]
 
     def run_once(self, max_events: int = 500, timeout_s: float = 1.0) -> int:
         """Execute a single poll -> validate -> apply -> checkpoint cycle."""
+        # Renew lease if due
+        if self.lease is not None:
+            self.lease.renew_if_due()
+
         messages = self.source.poll(max_events=max_events, timeout_s=timeout_s)
         now = time.time()
 
@@ -184,6 +190,12 @@ class StreamingMonitor:
     def run(self) -> None:
         """Start the streaming monitor loop."""
         print(f"[etsi-watchdog] Starting StreamingMonitor on topic '{self.config.topic}'...")
+
+        if self.lease is not None:
+            print(f"[etsi-watchdog] Acquiring owner lease for key '{self.lease.owner_key}'...")
+            self.lease.acquire()
+            print(f"[etsi-watchdog] Owner lease acquired successfully (token: {self.lease.token}).")
+
         self.dispatcher.start()
         self.source.start(self.store, self.config.group)
 
@@ -196,8 +208,19 @@ class StreamingMonitor:
     def stop(self) -> None:
         """Gracefully stop monitor, drain dispatcher, and close resources."""
         self._stop_requested = True
-        self.checkpoint(reason="shutdown")
+        try:
+            self.checkpoint(reason="shutdown")
+        except Exception as e:
+            print(f"[etsi-watchdog] Warning: error during final checkpoint: {e}")
+
         self.dispatcher.stop(timeout_s=10.0)
         self.source.close()
+
+        if self.lease is not None:
+            try:
+                self.lease.release()
+            except Exception as e:
+                print(f"[etsi-watchdog] Warning: failed to release owner lease: {e}")
+
         self.store.close()
         print("[etsi-watchdog] StreamingMonitor stopped gracefully.")

@@ -4,6 +4,31 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, List, Sequence
 
 
+class StateStoreError(Exception):
+    """Base exception for all streaming state persistence errors."""
+    pass
+
+
+class FenceMismatchError(StateStoreError, PermissionError):
+    """Raised when an atomic write_batch fails due to an owner fence token mismatch (zombie instance)."""
+    pass
+
+
+class LeaseError(StateStoreError):
+    """Base exception for single-instance owner lease errors."""
+    pass
+
+
+class LeaseAcquisitionError(LeaseError):
+    """Raised when a consumer instance fails to acquire the owner lease within the timeout."""
+    pass
+
+
+class LeaseLostError(LeaseError):
+    """Raised when a consumer instance detects that its owner lease was lost or expired."""
+    pass
+
+
 class StateStore(ABC):
     """
     Abstract Base Class for streaming state persistence backends (D-3).
