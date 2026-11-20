@@ -63,9 +63,9 @@ Part II fixes the interfaces, invariants and decisions; Part III the shared cont
   - **J2 (Alert delivery):** Confirmed — At-least-once with one documented residual duplicate window (D-6).
   - **J3 (Reservoir default):** Confirmed — 2,000 (max 10,000).
   - **J4 (Streaming KS threshold default):** Confirmed — 0.95 (batch default 0.2 stays untouched).
-  - **J5 (Docker base image):** Confirmed — python:3.11-slim.
-  - **J6 (window_size_events):** Confirmed — Deferred out of v1.
-  - **Q1 (Topology):** Confirmed — Producer key = stream_id; one stream -> one partition; several streams may share a partition.
+  - **J5 (Docker base image):** Confirmed — `python:3.11-slim`.
+  - **J6 (`window_size_events`):** Confirmed — Deferred out of v1.
+  - **Q1 (Topology):** Confirmed — Producer key = `stream_id`; one stream -> one partition; several streams may share a partition.
   - **Q2 (Redis owner lease):** Confirmed — Mandatory for every non-memory backend.
   - **Q3 (Kafka retention floor):** Confirmed — >= max tolerated outage + CHECKPOINT_SECONDS + margin; operational default >= 7 days.
 
