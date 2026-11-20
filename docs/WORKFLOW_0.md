@@ -930,14 +930,14 @@ Finish by running the Plan 7.3 integration test against the shipped compose.
 
 ## 23. Follow-up tickets (file at W0.4 so they are not silently skipped)
 
-1. **[ETSI-FUT-01]** log_drift raises FileNotFoundError on a bare filename (os.makedirs('')) — existing bug **[V]**. Backlog issue tracked.
-2. **[ETSI-FUT-02]** Batch PSI zero-mass rule hides drift when bins are vacated. Backlog issue tracked.
-3. **[ETSI-FUT-03]** Task 3.4 — multi-partition rebalance safety (v2). Backlog issue tracked.
-4. **[ETSI-FUT-04]** Quantile sketches (t-digest/KLL) as the KS/Wasserstein upgrade (v2). Backlog issue tracked.
-5. **[ETSI-FUT-05]** window_size_events support. Backlog issue tracked.
-6. **[ETSI-FUT-06]** Lazy imports in etsi/watchdog/__init__.py (separate maintainer discussion). Backlog issue tracked.
-7. **[ETSI-FUT-07]** Backward-compatible extra= kwarg on log_drift so stream/window identity gets its own CSV columns. Backlog issue tracked.
-8. **[ETSI-FUT-08]** Dead-letter topic for rejected messages (v2). Backlog issue tracked.
+1. **[#49](https://github.com/etsi-ai/etsi-watchdog/issues/49)** `log_drift` raises `FileNotFoundError` on a bare filename (`os.makedirs('')`) — existing bug **[V]**.
+2. **[#50](https://github.com/etsi-ai/etsi-watchdog/issues/50)** Batch PSI zero-mass rule hides drift when a bin is empty.
+3. **[#51](https://github.com/etsi-ai/etsi-watchdog/issues/51)** Task 3.4 — multi-partition rebalance safety for the streaming consumer (v2).
+4. **[#52](https://github.com/etsi-ai/etsi-watchdog/issues/52)** Quantile sketches (t-digest/KLL) for streaming KS and Wasserstein (v2).
+5. **[#53](https://github.com/etsi-ai/etsi-watchdog/issues/53)** Support count-based streaming windows (`window_size_events`).
+6. **[#54](https://github.com/etsi-ai/etsi-watchdog/issues/54)** Stop eager imports in `etsi.watchdog` package init.
+7. **[#55](https://github.com/etsi-ai/etsi-watchdog/issues/55)** Add extra columns to `log_drift` for stream and window identity.
+8. **[#56](https://github.com/etsi-ai/etsi-watchdog/issues/56)** Dead-letter topic for rejected streaming messages (v2).
 
 ---
 
