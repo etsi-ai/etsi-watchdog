@@ -4,8 +4,14 @@ import os
 import json
 from datetime import datetime
 from typing import Optional, Dict, Any
-from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
+try:
+    from slack_sdk import WebClient
+    from slack_sdk.errors import SlackApiError
+    _HAS_SLACK_SDK = True
+except ImportError:
+    _HAS_SLACK_SDK = False
+    WebClient = None
+    SlackApiError = Exception
 
 from .drift.base import DriftResult
 
@@ -34,6 +40,11 @@ class SlackNotifier:
             token: Slack bot token (if not provided, uses SLACK_BOT_TOKEN env var)
             channel: Default channel to send messages (if not provided, uses SLACK_CHANNEL env var)
         """
+        if not _HAS_SLACK_SDK:
+            raise ImportError(
+                "slack_sdk is required to use SlackNotifier. Install it via 'pip install slack_sdk'."
+            )
+
         self.token = token or os.getenv("SLACK_BOT_TOKEN")
         self.channel = channel or os.getenv("SLACK_CHANNEL", "#alerts")
         
