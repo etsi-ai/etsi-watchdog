@@ -241,3 +241,17 @@ class WindowEngine:
                 )
                 self.pending_markers.append(marker)
                 self.windows_flushed += 1
+
+    def clear_stream(self, stream_id: str) -> None:
+        """
+        Evict in-memory state for a revoked stream upon rebalance (Task 3.4, Issue #51).
+        Discards open windows, watermark, stream count, and dirty tracking.
+        """
+        keys_to_remove = [k for k in self.open_windows if k[0] == stream_id]
+        for k in keys_to_remove:
+            self.open_windows.pop(k, None)
+            self.dirty.discard(k)
+            self.flushed.discard(k)
+        self.watermarks.pop(stream_id, None)
+        self.stream_counts.pop(stream_id, None)
+        self.dirty_streams.discard(stream_id)
