@@ -4,7 +4,7 @@ import time
 from typing import Dict, List, Optional, Tuple, Any
 from etsi.watchdog.streaming.state.base import StateStore
 from etsi.watchdog.streaming.state.codec import encode
-from etsi.watchdog.streaming.windows.keys import offset_key, wm_key, win_key, marker_key
+from etsi.watchdog.streaming.windows.keys import offset_key, wm_key, stream_count_key, win_key, marker_key
 from etsi.watchdog.streaming.windows.engine import WindowEngine, Marker
 from etsi.watchdog.streaming.alerts import AlertDispatcher
 
@@ -67,14 +67,23 @@ class CheckpointWriter:
                 }
                 puts[k] = encode(payload)
                 # TTL = window_size + grace + margin (D-3)
-                window_ttl = int(self.engine.window_size + self.engine.grace + self.ttl_margin_seconds)
+                window_ttl = (
+                    int(self.ttl_margin_seconds * 2)
+                    if getattr(self.engine, "is_count_based", False)
+                    else int(self.engine.window_size + self.engine.grace + self.ttl_margin_seconds)
+                )
                 ttl_map[k] = window_ttl
 
-        # 2. Watermarks for dirty streams
+        # 2. Watermarks or counts for dirty streams
         for stream_id in self.engine.dirty_streams:
-            if stream_id in self.engine.watermarks:
-                k = wm_key(self.group, stream_id)
-                puts[k] = encode(float(self.engine.watermarks[stream_id]))
+            if getattr(self.engine, "is_count_based", False):
+                if stream_id in self.engine.stream_counts:
+                    k = stream_count_key(self.group, stream_id)
+                    puts[k] = encode(int(self.engine.stream_counts[stream_id]))
+            else:
+                if stream_id in self.engine.watermarks:
+                    k = wm_key(self.group, stream_id)
+                    puts[k] = encode(float(self.engine.watermarks[stream_id]))
 
         # 3. Flushed windows to delete from active state
         for stream_id, feature, ws in self.engine.flushed:

@@ -68,6 +68,7 @@ class StreamingMonitor:
             grace=self.config.grace_seconds,
             min_events=self.config.min_events,
             algo=self.config.algorithm,
+            window_size_events=self.config.window_size_events,
         )
 
         # 4. Initialize Alert Dispatcher

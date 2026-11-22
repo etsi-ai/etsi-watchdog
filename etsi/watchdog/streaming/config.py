@@ -21,6 +21,7 @@ class StreamingConfig:
     psi_buckets: int = 10
     window_type: str = "tumbling"
     window_seconds: float = 60.0
+    window_size_events: Optional[int] = None
     hop_seconds: Optional[float] = None
     grace_seconds: float = 30.0
     min_events: int = 50
@@ -54,6 +55,9 @@ class StreamingConfig:
         hop_env = os.getenv("WATCHDOG_HOP_SECONDS")
         hop_seconds = float(hop_env) if hop_env else None
 
+        win_events_env = os.getenv("WATCHDOG_WINDOW_SIZE_EVENTS") or os.getenv("WATCHDOG_WINDOW_EVENTS")
+        window_size_events = int(win_events_env) if win_events_env else None
+
         return cls(
             reference_path=ref_path,
             features=features,
@@ -65,6 +69,7 @@ class StreamingConfig:
             psi_buckets=int(os.getenv("WATCHDOG_PSI_BUCKETS", "10")),
             window_type=os.getenv("WATCHDOG_WINDOW_TYPE", "tumbling"),
             window_seconds=float(os.getenv("WATCHDOG_WINDOW_SECONDS", "60.0")),
+            window_size_events=window_size_events,
             hop_seconds=hop_seconds,
             grace_seconds=float(os.getenv("WATCHDOG_GRACE_SECONDS", "30.0")),
             min_events=int(os.getenv("WATCHDOG_MIN_EVENTS", "50")),
@@ -102,6 +107,11 @@ class StreamingConfig:
             raise ValueError(
                 f"Configuration error: WATCHDOG_LOG_PATH ('{self.log_path}') must contain a directory component "
                 f"(e.g. 'logs/{self.log_path}')."
+            )
+
+        if self.window_size_events is not None and self.window_size_events <= 0:
+            raise ValueError(
+                f"Configuration error: WATCHDOG_WINDOW_SIZE_EVENTS must be > 0 (got {self.window_size_events})."
             )
 
         if self.dead_letter_topic is not None and not self.dead_letter_topic.strip():
