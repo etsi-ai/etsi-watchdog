@@ -8,6 +8,8 @@ from .reference import ReferenceProfile
 from .psi_incremental import PsiStat
 from .ks_streaming import StreamingKsStat
 from .wasserstein_streaming import StreamingWassersteinStat
+from .ks_tdigest import TDigestKsStat
+from .wasserstein_tdigest import TDigestWassersteinStat
 
 
 def psi_streaming(
@@ -133,3 +135,85 @@ def wasserstein_streaming(
 # Metadata attributes for streaming runtime
 wasserstein_streaming.stat_factory = StreamingWassersteinStat
 wasserstein_streaming.default_threshold = 0.1
+
+
+def ks_tdigest(
+    reference_df: pd.DataFrame,
+    current_df: pd.DataFrame,
+    feature: str,
+    threshold: float = 0.95,
+) -> Optional[DriftResult]:
+    """
+    DataFrame-signature adapter for streaming Kolmogorov-Smirnov test via t-digest quantile sketch (Issue #52).
+    Replays current_df through TDigestKsStat against the reference profile.
+    Default threshold is 0.95.
+    """
+    if feature not in reference_df.columns or feature not in current_df.columns:
+        warnings.warn(f"[etsi-watchdog] Skipping '{feature}' — missing in one of the datasets.")
+        return None
+
+    if not pd.api.types.is_numeric_dtype(reference_df[feature]):
+        warnings.warn(f"[etsi-watchdog] Skipping '{feature}' — KS requires numeric data.")
+        return None
+
+    ref_series = reference_df[feature].dropna()
+    cur_series = current_df[feature].dropna()
+
+    if len(cur_series) < 50:
+        warnings.warn(
+            f"[etsi-watchdog] Sample size too small for reliable KS (<50): {len(cur_series)}",
+            stacklevel=2,
+        )
+
+    ref_profile = ReferenceProfile(ref_series.values, feature=feature)
+    stat = TDigestKsStat(compression=100.0)
+
+    for x in cur_series.values:
+        stat.update(float(x))
+
+    return stat.finalize(ref_profile, threshold=threshold)
+
+
+ks_tdigest.stat_factory = TDigestKsStat
+ks_tdigest.default_threshold = 0.95
+
+
+def wasserstein_tdigest(
+    reference_df: pd.DataFrame,
+    current_df: pd.DataFrame,
+    feature: str,
+    threshold: float = 0.1,
+) -> Optional[DriftResult]:
+    """
+    DataFrame-signature adapter for streaming Wasserstein Distance via t-digest quantile sketch (Issue #52).
+    Replays current_df through TDigestWassersteinStat against the reference profile.
+    """
+    if feature not in reference_df.columns or feature not in current_df.columns:
+        warnings.warn(f"[etsi-watchdog] Skipping '{feature}' — missing in one of the datasets.")
+        return None
+
+    if not pd.api.types.is_numeric_dtype(reference_df[feature]):
+        warnings.warn(f"[etsi-watchdog] Skipping '{feature}' — Wasserstein requires numeric data.")
+        return None
+
+    ref_series = reference_df[feature].dropna()
+    cur_series = current_df[feature].dropna()
+
+    if len(cur_series) < 50:
+        warnings.warn(
+            f"[etsi-watchdog] Sample size too small for reliable Wasserstein (<50): {len(cur_series)}",
+            stacklevel=2,
+        )
+
+    ref_profile = ReferenceProfile(ref_series.values, feature=feature)
+    stat = TDigestWassersteinStat(compression=100.0)
+
+    for x in cur_series.values:
+        stat.update(float(x))
+
+    return stat.finalize(ref_profile, threshold=threshold)
+
+
+wasserstein_tdigest.stat_factory = TDigestWassersteinStat
+wasserstein_tdigest.default_threshold = 0.1
+

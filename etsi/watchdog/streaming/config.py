@@ -117,7 +117,7 @@ class StreamingConfig:
         if self.dead_letter_topic is not None and not self.dead_letter_topic.strip():
             raise ValueError("Configuration error: WATCHDOG_DEAD_LETTER_TOPIC cannot be empty if specified.")
 
-        if self.algorithm == "wasserstein_streaming" and self.threshold is None:
+        if self.algorithm in ("wasserstein_streaming", "wasserstein_tdigest") and self.threshold is None:
             raise ValueError("Configuration error: Wasserstein distance threshold is required (no default).")
 
         if self.window_type == "hopping":

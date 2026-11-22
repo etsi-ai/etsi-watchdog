@@ -1,8 +1,14 @@
 # etsi/watchdog/streaming/state/redis_store.py
 
 from typing import Optional, Dict, List, Sequence, Any
-import redis
 from .base import StateStore, FenceMismatchError, StateStoreError
+
+try:
+    import redis
+    _HAS_REDIS = True
+except ImportError:
+    _HAS_REDIS = False
+    redis = None
 
 BATCH_WRITE_LUA = """
 local owner_key = KEYS[1]
@@ -55,10 +61,16 @@ class RedisStateStore(StateStore):
     ):
         if redis_client is not None:
             self._client = redis_client
-        elif url is not None:
-            self._client = redis.from_url(url, decode_responses=False, **redis_kwargs)
         else:
-            self._client = redis.Redis(decode_responses=False, **redis_kwargs)
+            if not _HAS_REDIS:
+                raise ImportError(
+                    "redis-py is required for RedisStateStore. "
+                    "Install via: pip install 'etsi-watchdog[streaming]'"
+                )
+            if url is not None:
+                self._client = redis.from_url(url, decode_responses=False, **redis_kwargs)
+            else:
+                self._client = redis.Redis(decode_responses=False, **redis_kwargs)
 
         self.owner_key: Optional[str] = owner_key
         try:
