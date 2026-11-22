@@ -239,6 +239,12 @@ def test_real_dataset_nasa_climate_monitor_without_slack_sdk(tmp_path):
     Integration test verifying Monitor rolling watch and CSV logging on NASA
     Global Surface Temperature Anomaly dataset when slack_sdk is omitted from environment.
     """
+    import os
+    import scipy
+    nasa_csv_path = os.path.join(os.path.dirname(scipy.__file__), "signal", "tests", "data", "GLB.Ts+dSST.csv")
+    if not os.path.exists(nasa_csv_path):
+        pytest.skip(f"NASA dataset not found at {nasa_csv_path}")
+
     log_csv = tmp_path / "nasa_temperature_drift.csv"
     code = f"""
 import sys
@@ -247,13 +253,13 @@ import pandas as pd
 sys.modules['slack_sdk'] = None
 from etsi.watchdog import Monitor
 
-# Generate realistic series based on NASA temperature anomalies (1880-present baseline)
-# Historical baseline (1880-1920) vs contemporary (2000-present)
-ref_temps = [-0.19, -0.11, -0.10, -0.21, -0.28, -0.26, -0.27, -0.33, -0.17, -0.12] * 10
-curr_temps = [0.42, 0.55, 0.63, 0.62, 0.54, 0.68, 0.64, 0.67, 0.72, 0.85] * 10
+df_nasa = pd.read_csv(r"{nasa_csv_path}", skiprows=1)
+df_nasa['Year'] = pd.to_numeric(df_nasa['Year'], errors='coerce')
+df_nasa['J-D'] = pd.to_numeric(df_nasa['J-D'], errors='coerce')
+df_clean = df_nasa.dropna(subset=['Year', 'J-D']).copy()
 
-ref_df = pd.DataFrame({{"temp_anomaly": ref_temps}})
-curr_df = pd.DataFrame({{"temp_anomaly": curr_temps}})
+ref_df = df_clean[df_clean['Year'] <= 1940][['J-D']].rename(columns={{'J-D': 'temp_anomaly'}})
+curr_df = df_clean[df_clean['Year'] > 1940][['J-D']].rename(columns={{'J-D': 'temp_anomaly'}})
 
 monitor = Monitor(ref_df)
 monitor.enable_logging(r"{str(log_csv)}")
@@ -263,6 +269,7 @@ df_logged = pd.read_csv(r"{str(log_csv)}")
 assert len(df_logged) == 1
 assert df_logged.iloc[0]["drift"] == True
 assert df_logged.iloc[0]["method"] == "ks"
+assert df_logged.iloc[0]["sample_size"] == len(curr_df)
 """
     res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert res.returncode == 0, f"NASA real climate data test without slack_sdk failed:\n{res.stderr}"
