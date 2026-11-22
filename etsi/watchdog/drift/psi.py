@@ -44,7 +44,8 @@ def compute_psi(expected, actual, buckets=10, threshold=0.2):
 
 def psi_drift(reference_df, current_df, feature, threshold=0.2):
     # Only process numeric data
-    if not np.issubdtype(reference_df[feature].dtype, np.number):
+    import pandas as pd
+    if not pd.api.types.is_numeric_dtype(reference_df[feature].dtype):
         warnings.warn(f"[etsi-watchdog] Skipping '{feature}' — PSI requires numeric data.")
         return None
 

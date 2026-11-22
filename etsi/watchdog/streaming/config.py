@@ -38,6 +38,7 @@ class StreamingConfig:
     health_seconds: float = 60.0
     slack_bot_token: Optional[str] = None
     slack_channel: str = "#alerts"
+    dead_letter_topic: Optional[str] = None
 
     @classmethod
     def from_env(cls) -> "StreamingConfig":
@@ -81,6 +82,7 @@ class StreamingConfig:
             health_seconds=float(os.getenv("WATCHDOG_HEALTH_SECONDS", "60.0")),
             slack_bot_token=os.getenv("SLACK_BOT_TOKEN"),
             slack_channel=os.getenv("SLACK_CHANNEL", "#alerts"),
+            dead_letter_topic=os.getenv("WATCHDOG_DEAD_LETTER_TOPIC") or os.getenv("WATCHDOG_DLQ_TOPIC"),
         )
 
     def validate(self) -> None:
@@ -101,6 +103,9 @@ class StreamingConfig:
                 f"Configuration error: WATCHDOG_LOG_PATH ('{self.log_path}') must contain a directory component "
                 f"(e.g. 'logs/{self.log_path}')."
             )
+
+        if self.dead_letter_topic is not None and not self.dead_letter_topic.strip():
+            raise ValueError("Configuration error: WATCHDOG_DEAD_LETTER_TOPIC cannot be empty if specified.")
 
         if self.algorithm == "wasserstein_streaming" and self.threshold is None:
             raise ValueError("Configuration error: Wasserstein distance threshold is required (no default).")

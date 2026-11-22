@@ -35,6 +35,8 @@ class StreamingMetrics:
     streams_active: int = 0
     streams_idle: int = 0
     lag_events: int = 0
+    dead_letter_published: int = 0
+    dead_letter_errors: int = 0
 
     def record_reject(self, reason: str) -> None:
         self.events_rejected[reason] = self.events_rejected.get(reason, 0) + 1
@@ -47,7 +49,7 @@ class StreamingMetrics:
         """Formatted health output matching §10.4 specification."""
         total_rejected = sum(self.events_rejected.values())
         mb = self.checkpoint_bytes_last / 1_000_000.0
-        return (
+        base = (
             f"[etsi-watchdog] events={self.events_in} "
             f"rejected={total_rejected} "
             f"late={self.late_dropped} "
@@ -56,3 +58,6 @@ class StreamingMetrics:
             f"alerts sent={self.alerts_sent} pending={self.alerts_pending} failed={self.alerts_failed} "
             f"streams={self.streams_active} idle={self.streams_idle}"
         )
+        if self.dead_letter_published > 0 or self.dead_letter_errors > 0:
+            base += f" dlq={self.dead_letter_published}"
+        return base

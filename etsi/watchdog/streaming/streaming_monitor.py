@@ -16,12 +16,13 @@ from .stats.reference import ReferenceProfile
 from .windows.engine import WindowEngine
 from .alerts import AlertDispatcher
 from .checkpoint import CheckpointWriter
+from .dlq import DeadLetterSink
 
 
 class StreamingMonitor:
     """
     Streaming drift monitor orchestrating Kafka consumer, window engine,
-    state persistence, and alert dispatch (Task 5.1, D-12).
+    state persistence, dead-letter queue, and alert dispatch (Task 5.1, D-12, Issue #56).
     """
 
     def __init__(
@@ -32,6 +33,7 @@ class StreamingMonitor:
         notifier: Optional[SlackNotifier] = None,
         references: Optional[Dict[str, ReferenceProfile]] = None,
         lease: Optional[RedisOwnerLease] = None,
+        dlq_sink: Optional[DeadLetterSink] = None,
     ):
         self.config: StreamingConfig = config
         self.config.validate()
@@ -85,6 +87,18 @@ class StreamingMonitor:
             lease_token=lease_token,
         )
 
+        # 6. Initialize Dead-Letter Queue Sink (Issue #56)
+        if dlq_sink is not None:
+            self.dlq_sink: Optional[DeadLetterSink] = dlq_sink
+        elif self.config.dead_letter_topic:
+            from .dlq import KafkaDeadLetterSink
+            self.dlq_sink = KafkaDeadLetterSink(
+                bootstrap_servers=self.config.kafka_bootstrap,
+                topic=self.config.dead_letter_topic,
+            )
+        else:
+            self.dlq_sink = None
+
         # State tracking
         self.known_streams: Set[str] = set()
         self.offsets: Dict[Tuple[str, int], int] = {}
@@ -121,6 +135,12 @@ class StreamingMonitor:
         """
         Execute atomic Checkpoint-then-Commit across StateStore and Kafka (D-6).
         """
+        if self.dlq_sink is not None:
+            try:
+                self.dlq_sink.flush()
+            except Exception as e:
+                print(f"[etsi-watchdog] Warning: Error flushing DLQ on checkpoint: {e}")
+
         res = self.checkpoint_writer.checkpoint(
             offsets=self.offsets,
             source=self.source,
@@ -130,6 +150,16 @@ class StreamingMonitor:
         self.last_checkpoint_ts = time.time()
         self.metrics.checkpoints += 1
         self.metrics.checkpoint_ms_last = res["elapsed_ms"]
+
+    def _send_to_dlq(self, msg: Any, reason: str, error_message: str) -> None:
+        if self.dlq_sink is None:
+            return
+        try:
+            self.dlq_sink.publish(raw_message=msg, reason=reason, error_message=error_message)
+            self.metrics.dead_letter_published += 1
+        except Exception as e:
+            self.metrics.dead_letter_errors += 1
+            print(f"[etsi-watchdog] Warning: Failed to publish message to DLQ: {e}")
 
     def run_once(self, max_events: int = 500, timeout_s: float = 1.0) -> int:
         """Execute a single poll -> validate -> apply -> checkpoint cycle."""
@@ -147,6 +177,8 @@ class StreamingMonitor:
 
             if not msg.value:
                 self.metrics.record_reject("bad_json")
+                if self.dlq_sink is not None:
+                    self._send_to_dlq(msg, "bad_json", "Empty message payload")
                 continue
 
             parsed, skips = parse_and_validate(
@@ -160,6 +192,8 @@ class StreamingMonitor:
 
             if isinstance(parsed, Reject):
                 self.metrics.record_reject(parsed.reason)
+                if self.dlq_sink is not None:
+                    self._send_to_dlq(msg, parsed.reason, parsed.message)
             elif isinstance(parsed, Event):
                 self.known_streams.add(parsed.stream_id)
                 self.metrics.record_feature_skips(skips)
@@ -215,6 +249,12 @@ class StreamingMonitor:
 
         self.dispatcher.stop(timeout_s=10.0)
         self.source.close()
+
+        if self.dlq_sink is not None:
+            try:
+                self.dlq_sink.close()
+            except Exception as e:
+                print(f"[etsi-watchdog] Warning: failed to close DLQ sink: {e}")
 
         if self.lease is not None:
             try:
