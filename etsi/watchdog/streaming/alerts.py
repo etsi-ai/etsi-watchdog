@@ -61,10 +61,15 @@ class AlertDispatcher:
                 self.metrics.alerts_pending -= 1
 
     def _dispatch_one(self, marker: Marker) -> None:
-        # 1. Log drift result to CSV (R6: encode stream_id into feature)
+        # 1. Log drift result to CSV (with stream and window identity columns, Issue #55)
         composite_feature = f"{marker.stream_id}/{marker.feature}"
+        extra_fields = {
+            "stream_id": marker.stream_id,
+            "window_start": marker.window_start,
+            "window_end": marker.window_end,
+        }
         try:
-            log_drift(marker.result, self.log_path, feature=composite_feature)
+            log_drift(marker.result, self.log_path, feature=composite_feature, extra=extra_fields)
         except Exception as e:
             print(f"[etsi-watchdog] Error logging drift to {self.log_path}: {e}")
 
