@@ -245,3 +245,89 @@ def test_real_dataset_streaming_monitor_with_extra_columns(tmp_path):
         assert r["stream_id"] == "bay-area-real"
         assert r["window_end"] == r["window_start"] + 20.0
 
+
+
+def test_real_dataset_nasa_climate_streaming_with_extra_columns(tmp_path):
+    """
+    Integration test using real NASA Global Surface Temperature Anomaly dataset (1880-present)
+    streaming through StreamingMonitor with AlertDispatcher.
+    Verifies that all flushed drift results written to CSV contain stream_id, window_start, and window_end.
+    """
+    import os
+    import json
+    import scipy
+    nasa_csv_path = os.path.join(os.path.dirname(scipy.__file__), "signal", "tests", "data", "GLB.Ts+dSST.csv")
+    if not os.path.exists(nasa_csv_path):
+        pytest.skip(f"NASA dataset not found at {nasa_csv_path}")
+
+    from etsi.watchdog.streaming.config import StreamingConfig
+    from etsi.watchdog.streaming.source import FakeEventSource, RawMessage
+    from etsi.watchdog.streaming.state.memory_store import InMemoryStateStore
+    from etsi.watchdog.streaming.streaming_monitor import StreamingMonitor
+
+    df_nasa = pd.read_csv(nasa_csv_path, skiprows=1)
+    df_nasa["Year"] = pd.to_numeric(df_nasa["Year"], errors="coerce")
+    df_nasa["J-D"] = pd.to_numeric(df_nasa["J-D"], errors="coerce")
+    df_clean = df_nasa.dropna(subset=["Year", "J-D"]).copy()
+
+    ref_path = tmp_path / "ref_nasa.csv"
+    baseline = df_clean[df_clean["Year"] <= 1940][["J-D"]].rename(columns={"J-D": "temp_anomaly"})
+    baseline.to_csv(ref_path, index=False)
+
+    modern = df_clean[df_clean["Year"] > 1940][["J-D"]].rename(columns={"J-D": "temp_anomaly"})
+
+    log_path = tmp_path / "logs" / "nasa_identity_drift.csv"
+
+    cfg = StreamingConfig(
+        reference_path=str(ref_path),
+        features=["temp_anomaly"],
+        topic="climate-telemetry",
+        window_seconds=30.0,
+        grace_seconds=5.0,
+        min_events=50,
+        log_path=str(log_path),
+    )
+
+    messages = []
+    base_ts = 1700000010.0
+    for i, (_, row) in enumerate(modern.iloc[:70].iterrows()):
+        payload = {
+            "stream_id": "nasa-global-surface",
+            "event_ts": base_ts + (i * 0.3),
+            "temp_anomaly": float(row["temp_anomaly"]),
+        }
+        messages.append(
+            RawMessage("climate-telemetry", 0, i, b"nasa-global-surface", json.dumps(payload).encode("utf-8"))
+        )
+
+    # Trailing message to advance watermark and flush
+    messages.append(
+        RawMessage(
+            "climate-telemetry",
+            0,
+            70,
+            b"nasa-global-surface",
+            json.dumps({"stream_id": "nasa-global-surface", "event_ts": base_ts + 60.0, "temp_anomaly": 0.95}).encode("utf-8"),
+        )
+    )
+
+    source = FakeEventSource(messages)
+    store = InMemoryStateStore()
+    monitor = StreamingMonitor(config=cfg, source=source, store=store)
+    monitor.dispatcher.start()
+
+    while monitor.run_once(max_events=50) > 0:
+        pass
+
+    monitor.dispatcher.stop(timeout_s=5.0)
+
+    assert log_path.exists()
+    df_out = pd.read_csv(log_path)
+    assert len(df_out) >= 1
+
+    assert "stream_id" in df_out.columns
+    assert "window_start" in df_out.columns
+    assert "window_end" in df_out.columns
+    for _, r in df_out.iterrows():
+        assert r["stream_id"] == "nasa-global-surface"
+        assert r["window_end"] == r["window_start"] + 30.0
