@@ -3,7 +3,7 @@
 
 > **How to use this file.** It is the *only* document an engineer needs, plus read access to the repository. The Watchdog Task Plan, the three candidate proposals that were evaluated, and every verification result are digested or embedded below. Nothing here says "see another file".
 > **Intended path:** `docs/WORKFLOW_0.md`. Part II is the ADR; if maintainers prefer the usual layout, split Part II into `docs/adr/0001-streaming-architecture.md` and keep the rest here.
-> **Baseline:** `etsi-ai/etsi-watchdog`, branch `main`, commit `82bc76b` ("Fix models sub-package export"), package v3.0.0. Re-check with `git log -1` before starting; if `main` moved, re-run Appendix B.
+> **Baseline:** `etsi-ai/etsi-watchdog`, branch `main` (originally verified at `82bc76b`; `main` subsequently advanced to `e467479` with PRs #47 and #48 merging M1 and reservoir stats), package v3.0.0. Appendix A/B numbers below are from the `82bc76b` verification run.
 > **Status:** Ratified by maintainer. All decisions ratified in §2.
 > **Rule:** no Workstream 1–8 code starts before the Gate (§20) is green.
 
