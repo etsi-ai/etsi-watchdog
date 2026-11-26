@@ -15,6 +15,7 @@ def psi_streaming(
     current_df: pd.DataFrame,
     feature: str,
     threshold: float = 0.2,
+    buckets: int = 10,
 ) -> Optional[DriftResult]:
     """
     DataFrame-signature adapter for incremental streaming PSI.
@@ -38,7 +39,7 @@ def psi_streaming(
             stacklevel=2,
         )
 
-    ref_profile = ReferenceProfile(ref_series.values, feature=feature, buckets=10)
+    ref_profile = ReferenceProfile(ref_series.values, feature=feature, buckets=buckets)
     stat = PsiStat(buckets=ref_profile.buckets, edges=ref_profile.edges_list)
 
     for x in cur_series.values:

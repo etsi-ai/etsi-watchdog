@@ -194,6 +194,57 @@ class TestStreamingKsStat:
         assert stat2.n == stat1.n
         assert stat2.reservoir.values == stat1.reservoir.values
 
+    def test_ks_finalize_fallback_without_sorted_sample(self):
+        class MinimalRef:
+            ref_counts = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+        stat = StreamingKsStat(capacity=50, seed=1)
+        for v in [1.0, 2.0, 3.0]:
+            stat.update(v)
+
+        res = stat.finalize(MinimalRef(), threshold=0.95)
+        assert isinstance(res, DriftResult)
+        assert res.method == "ks"
+
+    def test_dkw_bound_empirical_coverage(self):
+        rng = np.random.default_rng(2026)
+        ref_data = rng.normal(0.0, 1.0, 10000)
+        cur_data = rng.normal(0.35, 1.0, 5000)
+        ref_prof = ReferenceProfile(ref_data, feature="f1")
+        batch_stat, _ = ks_2samp(ref_prof.sorted_sample, cur_data)
+        eps_ref = math.sqrt(math.log(2.0 / 0.05) / (2.0 * len(ref_prof.sorted_sample)))
+
+        covered = 0
+        trials = 40
+        for seed in range(trials):
+            stat = StreamingKsStat(capacity=2000, seed=seed)
+            for x in cur_data:
+                stat.update(float(x))
+            res = stat.finalize(ref_prof, threshold=0.95)
+            bound = res.details["dkw_epsilon_95"] + eps_ref
+            if abs(res.details["ks_statistic"] - batch_stat) <= bound:
+                covered += 1
+
+        assert covered / trials >= 0.93
+
+    def test_ks_merge_preserves_counts_and_distribution(self):
+        rng = np.random.default_rng(77)
+        ref_prof = ReferenceProfile(rng.normal(0.0, 1.0, 4000), feature="f")
+
+        s1 = StreamingKsStat(capacity=500, seed=1)
+        s2 = StreamingKsStat(capacity=500, seed=2)
+        for x in rng.normal(0.0, 1.0, 1000):
+            s1.update(float(x))
+        for x in rng.normal(0.0, 1.0, 300):
+            s2.update(float(x))
+
+        merged = s1.merge(s2, rng_seed=123)
+        assert merged.n == 1300
+        assert merged.capacity == 500
+        assert len(merged.reservoir.values) == 500
+        res = merged.finalize(ref_prof, threshold=0.95)
+        assert res.is_drifted is False
+
 
 class TestStreamingWassersteinStat:
     def test_wasserstein_distance_properties(self):
@@ -231,6 +282,39 @@ class TestStreamingWassersteinStat:
         assert stat2.capacity == stat1.capacity
         assert stat2.n == stat1.n
         assert stat2.reservoir.values == stat1.reservoir.values
+
+    def test_wasserstein_error_bound_vs_batch(self):
+        rng = np.random.default_rng(404)
+        ref_data = rng.uniform(0.0, 10.0, 5000)
+        cur_data = rng.uniform(1.5, 11.5, 5000)
+        ref_prof = ReferenceProfile(ref_data, feature="bounded")
+
+        stat = StreamingWassersteinStat(capacity=2000, seed=42)
+        for x in cur_data:
+            stat.update(float(x))
+
+        stream_res = stat.finalize(ref_prof, threshold=0.5)
+        exact_dist = float(wasserstein_distance(ref_prof.sorted_sample, cur_data))
+        assert abs(stream_res.score - exact_dist) < 0.25
+
+    def test_wasserstein_merge_preserves_counts_and_estimate(self):
+        rng = np.random.default_rng(505)
+        ref_prof = ReferenceProfile(rng.normal(0.0, 1.0, 3000), feature="f")
+
+        s1 = StreamingWassersteinStat(capacity=500, seed=10)
+        s2 = StreamingWassersteinStat(capacity=500, seed=20)
+        for x in rng.normal(2.0, 1.0, 800):
+            s1.update(float(x))
+        for x in rng.normal(2.0, 1.0, 400):
+            s2.update(float(x))
+
+        merged = s1.merge(s2, rng_seed=99)
+        assert merged.n == 1200
+        assert merged.capacity == 500
+        assert len(merged.reservoir.values) == 500
+        res = merged.finalize(ref_prof, threshold=0.5)
+        assert res.is_drifted is True
+        assert abs(res.score - 2.0) < 0.25
 
 
 class TestRegistryAndDriftCheckIntegration:
@@ -336,3 +420,66 @@ class TestStreamingMonitorWithReservoirAlgorithms:
         assert os.path.exists(log_path)
         log_df = pd.read_csv(log_path)
         assert len(log_df) >= 4
+
+    def test_monitor_e2e_wasserstein_streaming(self, tmp_path):
+        import json
+        rng = np.random.default_rng(108)
+        ref_data = rng.normal(10.0, 1.0, 2000)
+        ref_path = str(tmp_path / "ref_w.csv")
+        log_path = str(tmp_path / "logs_w" / "drift.csv")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        pd.DataFrame({"pressure": ref_data}).to_csv(ref_path, index=False)
+
+        cfg = StreamingConfig(
+            reference_path=ref_path,
+            features=["pressure"],
+            topic="telemetry",
+            algorithm="wasserstein_streaming",
+            threshold=0.8,
+            window_seconds=10.0,
+            grace_seconds=2.0,
+            min_events=50,
+            reservoir_size=500,
+            seed=7,
+            log_path=log_path,
+        )
+
+        msgs = []
+        offset = 0
+        ts = 100.0
+
+        def make_msg(curr_ts, val):
+            nonlocal offset
+            payload = json.dumps({"stream_id": "pump-1", "event_ts": curr_ts, "pressure": float(val)}).encode("utf-8")
+            msg = RawMessage("telemetry", 0, offset, b"pump-1", payload)
+            offset += 1
+            return msg
+
+        # Window 0: stationary N(10, 1)
+        for _ in range(60):
+            msgs.append(make_msg(ts, rng.normal(10.0, 1.0)))
+            ts += 0.1
+        ts += 15.0  # flush window 0
+
+        # Window 1: shifted N(13.0, 1.0)
+        for _ in range(60):
+            msgs.append(make_msg(ts, rng.normal(13.0, 1.0)))
+            ts += 0.1
+        ts += 15.0
+        msgs.append(make_msg(ts, 10.0))  # flush window 1
+
+        source = FakeEventSource(msgs)
+        store = InMemoryStateStore()
+        monitor = StreamingMonitor(cfg, source=source, store=store)
+        monitor.dispatcher.start()
+        try:
+            monitor.run_once()
+        finally:
+            monitor.dispatcher.stop(timeout_s=5.0)
+
+        assert monitor.engine.windows_flushed == 2
+        log_df = pd.read_csv(log_path)
+        assert len(log_df) == 2
+        assert bool(log_df.iloc[0]["drift"]) is False
+        assert bool(log_df.iloc[1]["drift"]) is True
+        assert log_df.iloc[1]["score"] > 2.0

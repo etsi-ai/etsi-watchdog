@@ -91,6 +91,8 @@ class StreamingConfig:
             raise ValueError("Configuration error: WATCHDOG_FEATURES must contain at least one feature.")
         if not self.topic:
             raise ValueError("Configuration error: WATCHDOG_TOPIC is required.")
+        if self.reservoir_size <= 0:
+            raise ValueError(f"Configuration error: RESERVOIR_SIZE must be positive (got {self.reservoir_size}).")
         if self.reservoir_size > 10000:
             raise ValueError(f"Configuration error: RESERVOIR_SIZE cannot exceed 10000 (got {self.reservoir_size}).")
 

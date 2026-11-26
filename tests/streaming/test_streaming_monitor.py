@@ -26,7 +26,7 @@ def test_streaming_monitor_config_fail_fast(tmp_path):
     with pytest.raises(ValueError, match="must contain a directory component"):
         cfg_bad_log.validate()
 
-    # 2. Reservoir size > 10,000 must fail fast (D-1)
+    # 2. Reservoir size > 10,000 or <= 0 must fail fast (D-1)
     cfg_bad_res = StreamingConfig(
         reference_path=str(ref_file),
         features=["feature_a"],
@@ -36,6 +36,16 @@ def test_streaming_monitor_config_fail_fast(tmp_path):
     )
     with pytest.raises(ValueError, match="RESERVOIR_SIZE cannot exceed 10000"):
         cfg_bad_res.validate()
+
+    cfg_zero_res = StreamingConfig(
+        reference_path=str(ref_file),
+        features=["feature_a"],
+        topic="test-topic",
+        log_path="logs/drift.csv",
+        reservoir_size=0,
+    )
+    with pytest.raises(ValueError, match="RESERVOIR_SIZE must be positive"):
+        cfg_zero_res.validate()
 
 
 def test_streaming_monitor_level_shift_pipeline_e2e(tmp_path):
@@ -129,3 +139,149 @@ def test_streaming_monitor_level_shift_pipeline_e2e(tmp_path):
 
     # 5. Verify advisory offset commit
     assert source.committed_offsets == {("telemetry", 0): len(raw_messages)}
+
+
+def test_streaming_monitor_wires_reservoir_size_and_seed(tmp_path):
+    """StreamingMonitor must propagate config.reservoir_size and config.seed to WindowEngine stats."""
+    rng = np.random.default_rng(7)
+    ref_file = tmp_path / "ref.csv"
+    pd.DataFrame({"val": rng.normal(0.0, 1.0, 1000)}).to_csv(ref_file, index=False)
+
+    def build_messages():
+        msgs = []
+        offset = 0
+        for t in range(150):
+            payload = json.dumps({"stream_id": "s1", "event_ts": float(t * 0.2), "val": float(rng.normal(0.3, 1.0))}).encode("utf-8")
+            msgs.append(RawMessage("telemetry", 0, offset, b"s1", payload))
+            offset += 1
+        # Trailing event past window_end (60s) + grace (30s) = 90s to flush window 0
+        payload = json.dumps({"stream_id": "s1", "event_ts": 95.0, "val": 0.0}).encode("utf-8")
+        msgs.append(RawMessage("telemetry", 0, offset, b"s1", payload))
+        return msgs
+
+    raw_msgs = build_messages()
+
+    def run_with(algo, threshold, reservoir_size, seed, idx):
+        cfg = StreamingConfig(
+            reference_path=str(ref_file),
+            features=["val"],
+            topic="telemetry",
+            algorithm=algo,
+            threshold=threshold,
+            window_seconds=60.0,
+            grace_seconds=30.0,
+            min_events=50,
+            reservoir_size=reservoir_size,
+            seed=seed,
+            log_path=str(tmp_path / f"logs_{idx}" / "drift.csv"),
+        )
+        captured = []
+        mon = StreamingMonitor(cfg, source=FakeEventSource(raw_msgs), store=InMemoryStateStore())
+        orig_enqueue = mon.dispatcher.enqueue
+        mon.dispatcher.enqueue = lambda markers: (captured.extend(markers), orig_enqueue(markers))
+        mon.dispatcher.start()
+        try:
+            while mon.run_once(max_events=500) > 0:
+                pass
+        finally:
+            mon.dispatcher.stop(timeout_s=5.0)
+        return captured[0].result
+
+    ks_s1 = run_with("ks_streaming", 0.95, 100, 11, 1)
+    ks_s1_repeat = run_with("ks_streaming", 0.95, 100, 11, 2)
+    ks_s2 = run_with("ks_streaming", 0.95, 100, 99, 3)
+
+    assert ks_s1.details["capacity"] == 100
+    assert ks_s1.details["reservoir_size"] == 100
+    assert ks_s1.score == ks_s1_repeat.score
+    assert ks_s1.details["ks_statistic"] != ks_s2.details["ks_statistic"]
+
+    w_res = run_with("wasserstein_streaming", 0.5, 120, 19, 4)
+    assert w_res.method == "wasserstein"
+    assert w_res.details["capacity"] == 120
+    assert w_res.details["reservoir_size"] == 120
+
+
+def test_user_operational_env_workflow_e2e(tmp_path, monkeypatch):
+    """
+    Simulate how a user operates the streaming monitor in production:
+    env-var configuration -> mixed valid/poison/late JSON events -> CSV log & health line.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    rng = np.random.default_rng(314)
+    ref_file = tmp_path / "reference.csv"
+    log_file = tmp_path / "out" / "drift.csv"
+    pd.DataFrame({
+        "temp": rng.normal(20.0, 1.0, 1000),
+        "humidity": rng.normal(50.0, 5.0, 1000),
+    }).to_csv(ref_file, index=False)
+
+    monkeypatch.setenv("WATCHDOG_REFERENCE_PATH", str(ref_file))
+    monkeypatch.setenv("WATCHDOG_FEATURES", "temp,humidity")
+    monkeypatch.setenv("WATCHDOG_TOPIC", "sensors")
+    monkeypatch.setenv("WATCHDOG_ALGORITHM", "ks_streaming")
+    monkeypatch.setenv("WATCHDOG_THRESHOLD", "0.95")
+    monkeypatch.setenv("WATCHDOG_WINDOW_SECONDS", "60")
+    monkeypatch.setenv("WATCHDOG_GRACE_SECONDS", "30")
+    monkeypatch.setenv("WATCHDOG_MIN_EVENTS", "50")
+    monkeypatch.setenv("WATCHDOG_RESERVOIR_SIZE", "300")
+    monkeypatch.setenv("WATCHDOG_SEED", "42")
+    monkeypatch.setenv("WATCHDOG_LOG_PATH", str(log_file))
+
+    cfg = StreamingConfig.from_env()
+    cfg.validate()
+
+    base_dt = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    msgs = []
+    offset = 0
+
+    def add_raw(payload_bytes, key=b"station-1"):
+        nonlocal offset
+        msgs.append(RawMessage("sensors", 0, offset, key, payload_bytes))
+        offset += 1
+
+    # 1. Malformed JSON poison message (must drop and advance offset)
+    add_raw(b"{not-valid-json")
+
+    # 2. Window 0 [0..60): 55 valid ISO-8601 Z messages + 1 feature skip on humidity
+    for i in range(55):
+        ts_str = (base_dt + timedelta(seconds=i)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rec = {
+            "stream_id": "station-1",
+            "event_ts": ts_str,
+            "temp": float(rng.normal(25.0, 1.0)),  # strong shift
+            "humidity": "bad_str" if i == 0 else float(rng.normal(50.0, 5.0)),
+        }
+        add_raw(json.dumps(rec).encode("utf-8"))
+
+    # 3. Advance watermark past window 0 end + grace (60 + 30 = 90s)
+    ts_flush = (base_dt + timedelta(seconds=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    add_raw(json.dumps({"stream_id": "station-1", "event_ts": ts_flush, "temp": 20.0, "humidity": 50.0}).encode("utf-8"))
+
+    # 4. Late event belonging to Window 0 after flush -> must be dropped & counted
+    ts_late = (base_dt + timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    add_raw(json.dumps({"stream_id": "station-1", "event_ts": ts_late, "temp": 20.0, "humidity": 50.0}).encode("utf-8"))
+
+    source = FakeEventSource(msgs)
+    store = InMemoryStateStore()
+    mon = StreamingMonitor(cfg, source=source, store=store)
+    mon.dispatcher.start()
+    try:
+        processed = mon.run_once(max_events=200)
+        assert processed == len(msgs)
+    finally:
+        mon.stop()
+
+    assert mon.metrics.events_rejected.get("bad_json") == 1
+    assert mon.metrics.features_skipped.get("feature_nonnumeric") == 1
+    assert mon.metrics.late_dropped == 1
+    assert mon.metrics.windows_flushed == 2
+    assert source.committed_offsets == {("sensors", 0): len(msgs)}
+    assert "[etsi-watchdog]" in mon.metrics.health_line()
+
+    df_log = pd.read_csv(log_file)
+    assert len(df_log) == 2
+    by_feat = {row["feature"]: row for _, row in df_log.iterrows()}
+    assert bool(by_feat["station-1/temp"]["drift"]) is True
+    assert bool(by_feat["station-1/humidity"]["drift"]) is False

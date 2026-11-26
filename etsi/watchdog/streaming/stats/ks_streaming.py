@@ -2,6 +2,7 @@
 
 import math
 from typing import Dict, Any, Optional
+import numpy as np
 from scipy.stats import ks_2samp
 from etsi.watchdog.drift.base import DriftResult
 from .base import StreamingStat

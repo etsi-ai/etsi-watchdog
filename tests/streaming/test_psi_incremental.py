@@ -191,3 +191,14 @@ def test_import_isolation():
     )
     res_streaming = subprocess.run([sys.executable, "-c", code_streaming], capture_output=True, text=True)
     assert res_streaming.returncode == 0, f"Streaming import failed: {res_streaming.stderr}"
+
+
+def test_psi_streaming_adapter_respects_buckets():
+    """psi_streaming adapter must honor optional buckets parameter while preserving 4-arg signature."""
+    rng = np.random.default_rng(12)
+    ref_df = pd.DataFrame({"x": rng.normal(0, 1, 200)})
+    cur_df = pd.DataFrame({"x": rng.normal(0.5, 1, 200)})
+
+    res = psi_streaming(ref_df, cur_df, "x", threshold=0.2, buckets=5)
+    assert res is not None
+    assert len(res.details["bins"]) == 5

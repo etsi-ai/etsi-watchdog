@@ -45,6 +45,8 @@ class WindowEngine:
         grace: float = 30.0,
         min_events: int = 50,
         algo: str = "psi",
+        reservoir_size: int = 2000,
+        seed: int = 0,
     ):
         self.window_size: float = float(window_size)
         self.stat_factory = stat_factory
@@ -53,6 +55,8 @@ class WindowEngine:
         self.grace: float = float(grace)
         self.min_events: int = int(min_events)
         self.algo: str = algo
+        self.reservoir_size: int = int(reservoir_size)
+        self.seed: int = int(seed)
 
         # State collections
         self.open_windows: Dict[Tuple[str, str, float], StreamingStat] = {}
@@ -92,6 +96,8 @@ class WindowEngine:
                         stream_id=ev.stream_id,
                         feature=f,
                         window_start=ws,
+                        capacity=self.reservoir_size,
+                        base_seed=self.seed,
                     )
                 else:
                     self.open_windows[key] = self.stat_factory(ref_prof.buckets, ref_prof.edges_list)
