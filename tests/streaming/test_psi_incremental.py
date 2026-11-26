@@ -171,23 +171,25 @@ def test_drift_check_adapter_integration():
 
 def test_import_isolation():
     """
-    import etsi.watchdog alone must NOT register psi_streaming or produce
-    new stdout prints. Only importing etsi.watchdog.streaming registers it.
+    import etsi.watchdog alone must NOT register streaming algorithms or produce
+    new stdout prints. Only importing etsi.watchdog.streaming registers them.
     """
     # 1. Verify bare import etsi.watchdog
     code_bare = (
         "import etsi.watchdog as wd\n"
         "from etsi.watchdog.drift.factory import _DRIFT_REGISTRY\n"
-        "assert 'psi_streaming' not in _DRIFT_REGISTRY, 'psi_streaming registered eagerly!'\n"
+        "for name in ('psi_streaming', 'ks_streaming', 'wasserstein_streaming'):\n"
+        "    assert name not in _DRIFT_REGISTRY, f'{name} registered eagerly!'\n"
     )
     res_bare = subprocess.run([sys.executable, "-c", code_bare], capture_output=True, text=True)
     assert res_bare.returncode == 0, f"Bare import failed: {res_bare.stderr}"
 
-    # 2. Verify import etsi.watchdog.streaming registers psi_streaming
+    # 2. Verify import etsi.watchdog.streaming registers all streaming algorithms
     code_streaming = (
         "import etsi.watchdog.streaming\n"
         "from etsi.watchdog.drift.factory import _DRIFT_REGISTRY\n"
-        "assert 'psi_streaming' in _DRIFT_REGISTRY, 'psi_streaming was not registered!'\n"
+        "for name in ('psi_streaming', 'ks_streaming', 'wasserstein_streaming'):\n"
+        "    assert name in _DRIFT_REGISTRY, f'{name} was not registered!'\n"
     )
     res_streaming = subprocess.run([sys.executable, "-c", code_streaming], capture_output=True, text=True)
     assert res_streaming.returncode == 0, f"Streaming import failed: {res_streaming.stderr}"

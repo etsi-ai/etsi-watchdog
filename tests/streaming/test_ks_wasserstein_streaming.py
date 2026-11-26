@@ -194,25 +194,25 @@ class TestStreamingKsStat:
         assert stat2.n == stat1.n
         assert stat2.reservoir.values == stat1.reservoir.values
 
-    def test_ks_finalize_fallback_without_sorted_sample(self):
-        class MinimalRef:
+    def test_ks_finalize_without_sorted_sample_raises(self):
+        """Missing ReferenceProfile.sorted_sample must fail fast instead of using bin counts."""
+        class MissingSampleRef:
             ref_counts = [1.0, 2.0, 3.0, 4.0, 5.0]
 
         stat = StreamingKsStat(capacity=50, seed=1)
         for v in [1.0, 2.0, 3.0]:
             stat.update(v)
 
-        res = stat.finalize(MinimalRef(), threshold=0.95)
-        assert isinstance(res, DriftResult)
-        assert res.method == "ks"
+        with pytest.raises(ValueError, match="sorted_sample"):
+            stat.finalize(MissingSampleRef(), threshold=0.95)
 
     def test_dkw_bound_empirical_coverage(self):
+        """Verify >=93% of seeds fall within the 95% DKW bound vs full window."""
         rng = np.random.default_rng(2026)
         ref_data = rng.normal(0.0, 1.0, 10000)
         cur_data = rng.normal(0.35, 1.0, 5000)
         ref_prof = ReferenceProfile(ref_data, feature="f1")
         batch_stat, _ = ks_2samp(ref_prof.sorted_sample, cur_data)
-        eps_ref = math.sqrt(math.log(2.0 / 0.05) / (2.0 * len(ref_prof.sorted_sample)))
 
         covered = 0
         trials = 40
@@ -221,29 +221,31 @@ class TestStreamingKsStat:
             for x in cur_data:
                 stat.update(float(x))
             res = stat.finalize(ref_prof, threshold=0.95)
-            bound = res.details["dkw_epsilon_95"] + eps_ref
-            if abs(res.details["ks_statistic"] - batch_stat) <= bound:
+            if abs(res.details["ks_statistic"] - batch_stat) <= res.details["dkw_epsilon_95"]:
                 covered += 1
 
         assert covered / trials >= 0.93
 
     def test_ks_merge_preserves_counts_and_distribution(self):
+        """Merging unequal, differently distributed StreamingKsStat slices matches union."""
         rng = np.random.default_rng(77)
-        ref_prof = ReferenceProfile(rng.normal(0.0, 1.0, 4000), feature="f")
+        s1_data = rng.normal(0.0, 1.0, 3000)
+        s2_data = rng.normal(2.0, 1.0, 1000)
+        union = np.concatenate([s1_data, s2_data])
 
-        s1 = StreamingKsStat(capacity=500, seed=1)
-        s2 = StreamingKsStat(capacity=500, seed=2)
-        for x in rng.normal(0.0, 1.0, 1000):
+        s1 = StreamingKsStat(capacity=1000, seed=1)
+        s2 = StreamingKsStat(capacity=1000, seed=2)
+        for x in s1_data:
             s1.update(float(x))
-        for x in rng.normal(0.0, 1.0, 300):
+        for x in s2_data:
             s2.update(float(x))
 
         merged = s1.merge(s2, rng_seed=123)
-        assert merged.n == 1300
-        assert merged.capacity == 500
-        assert len(merged.reservoir.values) == 500
-        res = merged.finalize(ref_prof, threshold=0.95)
-        assert res.is_drifted is False
+        assert merged.n == 4000
+        assert merged.capacity == 1000
+        assert len(merged.reservoir.values) == 1000
+        _, pval = ks_2samp(merged.reservoir.values, union)
+        assert pval > 0.05
 
 
 class TestStreamingWassersteinStat:
@@ -284,6 +286,7 @@ class TestStreamingWassersteinStat:
         assert stat2.reservoir.values == stat1.reservoir.values
 
     def test_wasserstein_error_bound_vs_batch(self):
+        """Relative error of reservoir Wasserstein vs exact batch distance stays <= 15% on bounded features."""
         rng = np.random.default_rng(404)
         ref_data = rng.uniform(0.0, 10.0, 5000)
         cur_data = rng.uniform(1.5, 11.5, 5000)
@@ -295,26 +298,31 @@ class TestStreamingWassersteinStat:
 
         stream_res = stat.finalize(ref_prof, threshold=0.5)
         exact_dist = float(wasserstein_distance(ref_prof.sorted_sample, cur_data))
-        assert abs(stream_res.score - exact_dist) < 0.25
+        rel_error = abs(stream_res.score - exact_dist) / exact_dist
+        assert rel_error <= 0.15
 
     def test_wasserstein_merge_preserves_counts_and_estimate(self):
+        """Merging unequal StreamingWassersteinStat slices preserves exact union distance estimate."""
         rng = np.random.default_rng(505)
         ref_prof = ReferenceProfile(rng.normal(0.0, 1.0, 3000), feature="f")
+        s1_data = rng.normal(1.0, 1.0, 1500)
+        s2_data = rng.normal(3.0, 1.0, 500)
+        union = np.concatenate([s1_data, s2_data])
 
-        s1 = StreamingWassersteinStat(capacity=500, seed=10)
-        s2 = StreamingWassersteinStat(capacity=500, seed=20)
-        for x in rng.normal(2.0, 1.0, 800):
+        s1 = StreamingWassersteinStat(capacity=800, seed=10)
+        s2 = StreamingWassersteinStat(capacity=800, seed=20)
+        for x in s1_data:
             s1.update(float(x))
-        for x in rng.normal(2.0, 1.0, 400):
+        for x in s2_data:
             s2.update(float(x))
 
         merged = s1.merge(s2, rng_seed=99)
-        assert merged.n == 1200
-        assert merged.capacity == 500
-        assert len(merged.reservoir.values) == 500
+        assert merged.n == 2000
+        assert merged.capacity == 800
+        assert len(merged.reservoir.values) == 800
         res = merged.finalize(ref_prof, threshold=0.5)
-        assert res.is_drifted is True
-        assert abs(res.score - 2.0) < 0.25
+        exact_union_dist = float(wasserstein_distance(ref_prof.sorted_sample, union))
+        assert abs(res.score - exact_union_dist) / exact_union_dist <= 0.15
 
 
 class TestRegistryAndDriftCheckIntegration:

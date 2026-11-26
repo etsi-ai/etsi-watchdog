@@ -2,7 +2,6 @@
 
 import math
 from typing import Dict, Any, Optional
-import numpy as np
 from scipy.stats import ks_2samp
 from etsi.watchdog.drift.base import DriftResult
 from .base import StreamingStat
@@ -111,7 +110,7 @@ class StreamingKsStat(StreamingStat):
         else:
             ref_vals = getattr(ref, "sorted_sample", None)
             if ref_vals is None or len(ref_vals) == 0:
-                ref_vals = np.asarray(ref.ref_counts, dtype=np.float64)
+                raise ValueError("ReferenceProfile must provide non-empty 'sorted_sample' for streaming KS.")
 
             ks_res = ks_2samp(ref_vals, self.reservoir.values)
             stat = float(ks_res.statistic)

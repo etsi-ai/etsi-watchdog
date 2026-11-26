@@ -161,19 +161,20 @@ def test_streaming_monitor_wires_reservoir_size_and_seed(tmp_path):
 
     raw_msgs = build_messages()
 
-    def run_with(algo, threshold, reservoir_size, seed, idx):
+    def execute_monitor(algorithm, threshold, reservoir_size, seed, run_index):
+        """Run a fresh StreamingMonitor with the specified algorithm, reservoir_size, and seed."""
         cfg = StreamingConfig(
             reference_path=str(ref_file),
             features=["val"],
             topic="telemetry",
-            algorithm=algo,
+            algorithm=algorithm,
             threshold=threshold,
             window_seconds=60.0,
             grace_seconds=30.0,
             min_events=50,
             reservoir_size=reservoir_size,
             seed=seed,
-            log_path=str(tmp_path / f"logs_{idx}" / "drift.csv"),
+            log_path=str(tmp_path / f"logs_{run_index}" / "drift.csv"),
         )
         captured = []
         mon = StreamingMonitor(cfg, source=FakeEventSource(raw_msgs), store=InMemoryStateStore())
@@ -187,19 +188,19 @@ def test_streaming_monitor_wires_reservoir_size_and_seed(tmp_path):
             mon.dispatcher.stop(timeout_s=5.0)
         return captured[0].result
 
-    ks_s1 = run_with("ks_streaming", 0.95, 100, 11, 1)
-    ks_s1_repeat = run_with("ks_streaming", 0.95, 100, 11, 2)
-    ks_s2 = run_with("ks_streaming", 0.95, 100, 99, 3)
+    ks_seed1 = execute_monitor("ks_streaming", 0.95, 100, 11, 1)
+    ks_seed1_repeat = execute_monitor("ks_streaming", 0.95, 100, 11, 2)
+    ks_seed2 = execute_monitor("ks_streaming", 0.95, 100, 99, 3)
 
-    assert ks_s1.details["capacity"] == 100
-    assert ks_s1.details["reservoir_size"] == 100
-    assert ks_s1.score == ks_s1_repeat.score
-    assert ks_s1.details["ks_statistic"] != ks_s2.details["ks_statistic"]
+    assert ks_seed1.details["capacity"] == 100
+    assert ks_seed1.details["reservoir_size"] == 100
+    assert ks_seed1.score == ks_seed1_repeat.score
+    assert ks_seed1.details["ks_statistic"] != ks_seed2.details["ks_statistic"]
 
-    w_res = run_with("wasserstein_streaming", 0.5, 120, 19, 4)
-    assert w_res.method == "wasserstein"
-    assert w_res.details["capacity"] == 120
-    assert w_res.details["reservoir_size"] == 120
+    wasserstein_result = execute_monitor("wasserstein_streaming", 0.5, 120, 19, 4)
+    assert wasserstein_result.method == "wasserstein"
+    assert wasserstein_result.details["capacity"] == 120
+    assert wasserstein_result.details["reservoir_size"] == 120
 
 
 def test_user_operational_env_workflow_e2e(tmp_path, monkeypatch):

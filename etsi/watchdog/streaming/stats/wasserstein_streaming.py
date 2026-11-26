@@ -1,7 +1,6 @@
 # etsi/watchdog/streaming/stats/wasserstein_streaming.py
 
 from typing import Dict, Any, Optional
-import numpy as np
 from scipy.stats import wasserstein_distance
 from etsi.watchdog.drift.base import DriftResult
 from .base import StreamingStat
@@ -23,7 +22,8 @@ class StreamingWassersteinStat(StreamingStat):
     Because the streaming current window is tracked using a bounded reservoir sample of capacity k
     (default 2,000, max 10,000), the empirical Wasserstein distance W_1(P_ref, Q_k) converges to the
     true distribution distance W_1(P_ref, Q) at the standard empirical measure rate of O(k^{-1/2})
-    for distributions with finite second moments.
+    for distributions with finite second moments. There is no distribution-free finite-sample bound;
+    on bounded features with non-trivial shift and k = 2,000, empirical relative error is verified <= 15%.
 
     Unlike scale-free statistics (e.g. KS or PSI), the Wasserstein distance is expressed in the raw physical
     units of the measured feature. Consequently, threshold selection is feature-specific and should be calibrated
@@ -96,7 +96,7 @@ class StreamingWassersteinStat(StreamingStat):
         else:
             ref_vals = getattr(ref, "sorted_sample", None)
             if ref_vals is None or len(ref_vals) == 0:
-                ref_vals = np.asarray(ref.ref_counts, dtype=np.float64)
+                raise ValueError("ReferenceProfile must provide non-empty 'sorted_sample' for streaming Wasserstein.")
 
             dist = float(wasserstein_distance(ref_vals, self.reservoir.values))
 
