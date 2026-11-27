@@ -18,6 +18,8 @@
 | **D-8** | Alert delivery | At-least-once via dedicated `AlertDispatcher` thread (`log_drift` CSV with directory path + `SlackNotifier` on drift), idempotency key `(stream_id, feature, window_start, algo)`. |
 | **D-9** | 3.5 Poison messages | Message-level rejects and `ts_future` skew guard drop + count by reason and advance offset; feature-level invalid values skip only that feature. Never crash-loop on bad data. |
 | **D-10** | 1.3 Registry | `psi_streaming`, `ks_streaming` (default threshold `0.95`), `wasserstein_streaming` (threshold required) registered via `register_drift_algorithm()` only when `etsi.watchdog.streaming` is imported. |
+| **D-11** | 5.1, 5.2, 6.1, 6.3 Config & packaging | Env-driven `StreamingConfig.from_env()` (`WATCHDOG_*`, Slack `SLACK_BOT_TOKEN`/`SLACK_CHANNEL`); lazy `[streaming]` (`confluent-kafka>=2.0.0`, `redis>=5.0.0`, `msgpack>=1.0.0`) and `[streaming-rocksdb]` extras; `python:3.11-slim` Docker image; `python -m etsi.watchdog.streaming` + `etsi-watchdog-stream` (`#67`). |
+| **D-12** | 3.5, 7.3 Runtime & observability | Single processing thread + single `AlertDispatcher` thread (no asyncio); `EventSource` ABC (`FakeEventSource` for broker-free tests); counter metrics + periodic `print` health line (Prometheus `#71` deferred to v2); unit-level crash matrix before Docker IT (`#70`). |
 
 ## D-6 Checkpoint-Then-Commit Sequence
 
@@ -41,4 +43,4 @@ sequenceDiagram
     D->>S: mark marker sent
 ```
 
-For full contracts, error bounds, acceptance criteria, and follow-up tickets (`#49`–`#56`), see [docs/WORKFLOW_0.md](../WORKFLOW_0.md).
+For full contracts, composition, error bounds, acceptance criteria, and tracked issues (`#49–#56`, `#65–#72`), see [docs/WORKFLOW_0.md](../WORKFLOW_0.md).

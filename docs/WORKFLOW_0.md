@@ -603,11 +603,11 @@ docs/streaming.md
 |---|---|---|---|
 | **W0.1** | Merge this document as `docs/WORKFLOW_0.md` (optionally split Part II into `docs/adr/0001-streaming-architecture.md`); keep the D-6 sequence diagram | merged doc | maintainer approval |
 | **W0.2** | Record maintainer confirmation or overrides of J1–J6 and Q1–Q3 (§2) in a "Ratification" section at the top | doc edit | every item shows Confirmed or an override |
-| **W0.3** | Add `.github/workflows/ci.yml`: matrix Python 3.8 + 3.11; job A `pip install -e . pytest && pytest tests -q`; job B (dependency-floor probe) `pip install confluent-kafka redis msgpack` on 3.8 | CI green, job B result recorded | known whether 3.8 wheels exist |
+| **W0.3** | Add `.github/workflows/ci.yml`: matrix Python 3.8 + 3.11; job A `pip install -e . "pandas<3" pytest && pytest tests -q` (pin `pandas<3` until batch `drift/psi.py` updates `np.issubdtype` for `StringDtype`); job B (dependency-floor probe) `pip install -e ".[streaming]" "pandas<3" pytest` + `pytest tests/streaming -q` on 3.8 | CI green, job B result recorded | known whether 3.8 wheels install & pass |
 | **W0.4** | File the follow-up tickets in §23 | issue links added to §23 | all filed |
-| **W0.5** | Create `tests/streaming/` with `__init__.py`, `conftest.py` (registers the `integration` marker; integration tests run only with `WATCHDOG_IT=1`) | empty suite runs | `pytest tests/streaming` exits 0 |
+| **W0.5** | Create `tests/streaming/` with `__init__.py`, `conftest.py` (registers the `integration` marker; integration tests run only with `WATCHDOG_IT=1`) | suite initialized (PR #47) | `pytest tests/streaming` exits 0 |
 
-Gate G0 = W0.1–W0.5 complete (checklist in §20). **No M1 code before G0.**
+Gate G0 = W0.1–W0.5 complete (checklist in §20). **No Workstream 2–8 code before G0** (M1 + reservoir stats already merged on `main` via PRs #47 and #48).
 
 ## 13. M1 — Prove the pipeline (Plan M1: tumbling, in-memory, PSI, single consumer)
 
@@ -886,10 +886,37 @@ Finish by running the Plan 7.3 integration test against the shipped compose.
 
 ## 20. Gate — Workflow 0 is done when all are true
 
-- [x] This document merged as `docs/WORKFLOW_0.md` (Part II optionally split into `docs/adr/0001-streaming-architecture.md`)
-- [ ] CI added (`.github/workflows/ci.yml`: Python 3.8 + 3.11) and a dependency-floor job proves `confluent-kafka`, `redis`, `msgpack` install on 3.8 (workflow added; awaiting CI run + job B result recording)
-- [x] The eight follow-up tickets in §23 are filed and linked
-- [x] `tests/streaming/` skeleton with an `integration` marker (opt-in via `WATCHDOG_IT=1`) runs green when empty
+- [ ] **W0.1:** This document merged as `docs/WORKFLOW_0.md` (Part II summarized in `docs/adr/0001-streaming-architecture.md`)
+- [x] **W0.2:** Maintainer ratification of J1–J6 and Q1–Q3 recorded in §2.1
+- [ ] **W0.3:** CI added (`.github/workflows/ci.yml`: Python 3.8 + 3.11) and `dependency-floor-probe` proves `pip install -e ".[streaming]" "pandas<3" pytest` (`confluent-kafka>=2.0.0`, `redis>=5.0.0`, `msgpack>=1.0.0`) + `pytest tests/streaming -q` pass on Python 3.8 (workflow added; PyPI 3.8 wheels verified, awaiting CI run + job B result recording)
+- [x] **W0.4:** The eight §23 follow-up tickets (`#49–#56`) and downstream M2–M4/v2 tracking issues (`#65–#72`) are filed and linked
+- [x] **W0.5:** `tests/streaming/` skeleton with an `integration` marker (opt-in via `WATCHDOG_IT=1`) runs green
+
+### 20.1 Workstream 0 Execution Plan & Contributor Runway
+
+Because `main` (`e467479`) already includes PR #47 (M1 core pipeline + `tests/streaming/`) and PR #48 (PR-11 reservoir stats), Workstream 0 Gate G0 unlocks contributor work across Workstreams 1–8 in the following order:
+
+1. **Close Gate G0 (PR #73):**
+   - Trigger and verify `.github/workflows/ci.yml` (both the `3.8` / `3.11` core matrix and `dependency-floor-probe` running `pip install -e ".[streaming]" "pandas<3" pytest` + `pytest tests/streaming -q` on Python 3.8).
+   - Record the Python 3.8 probe outcome in §20 and merge PR #73 to `main`.
+2. **Wave 1 — Ready immediately after PR #73 merges (can run in parallel):**
+   - **M1 / PR-11 follow-up fixes (§13 PR-4/PR-5, §15 PR-11):** Add missing `import numpy as np` in `ks_streaming.py`, forward `reservoir_size`/`seed` in `StreamingMonitor`/`WindowEngine`, wire boot-time `SlackNotifier` in `__main__.py`, pass `_commit_cb` in `kafka_consumer.py`, add `examples/streaming_smoke.sh`, and add multi-seed DKW coverage / Wasserstein relative-error tests.
+   - **PR-6 (`[WS3-4 / M2]`, §14):** Implement `checkpoint.py` (`CheckpointWriter` atomic `write_batch`), replace the M1 stub in `StreamingMonitor.checkpoint()`, and implement Kafka `on_assign` seek-from-state + `offset_resets`.
+   - **[#65](https://github.com/etsi-ai/etsi-watchdog/issues/65)** *(Spike phase, PR-12)* `[WS2 / M3]` — Hopping-window decision memo + benchmark (does not block M2).
+   - **Independent §23 follow-ups:** [#49](https://github.com/etsi-ai/etsi-watchdog/issues/49), [#50](https://github.com/etsi-ai/etsi-watchdog/issues/50), [#54](https://github.com/etsi-ai/etsi-watchdog/issues/54), [#55](https://github.com/etsi-ai/etsi-watchdog/issues/55).
+3. **Wave 2 — M2 Fault-Tolerance Chain (strict order per §14):**
+   - **[#70](https://github.com/etsi-ai/etsi-watchdog/issues/70)** *(Part 1, PR-7)* — Crash-matrix harness (`test_crash_matrix.py`) on `InMemoryStateStore` (depends on PR-6; must pass before Redis).
+   - **PR-8 (`[WS4 / M2]`, §14):** `RedisStateStore` (Lua fencing) + `lease.py` + `__main__.py` Redis wiring + re-run crash matrix on Redis (depends on PR-6 and PR-7).
+   - **PR-9 (`[WS3, WS5, WS6 / M2]`, §14):** Boot-time state rehydration, 60s pending re-dispatch, graceful SIGTERM shutdown, and `docker-compose.test.yml` (depends on PR-6 and PR-8).
+   - **[#70](https://github.com/etsi-ai/etsi-watchdog/issues/70)** *(Part 2, PR-10)* — Containerized kill-and-restart integration test (`test_fault_tolerance_it.py`, Task 7.3) (depends on PR-9).
+4. **Wave 3 — M3 & M4 Completion (parallel once M2 core lands):**
+   - **[#65](https://github.com/etsi-ai/etsi-watchdog/issues/65)** *(PR-13)* — Hopping window implementation + `test_hopping.py` (after PR-12 spike approval).
+   - **[#66](https://github.com/etsi-ai/etsi-watchdog/issues/66)** `[WS4 / M3 / PR-14]` — Embedded RocksDB backend + shared `test_state_contract.py` (depends on PR-8).
+   - **[#67](https://github.com/etsi-ai/etsi-watchdog/issues/67)** `[WS5-6 / M4 / PR-15]` — Production `Dockerfile`, `docker-compose.yml`, `.env.example`, and `etsi-watchdog-stream` script (depends on PR-9).
+   - **[#69](https://github.com/etsi-ai/etsi-watchdog/issues/69)** `[WS7 / M4 / PR-16]` — Load/throughput benchmark suite (`examples/benchmark_streaming.py`) (depends on PR-8, PR-9).
+   - **[#68](https://github.com/etsi-ai/etsi-watchdog/issues/68)** `[WS8 / M4 / PR-17]` — `docs/streaming.md`, `examples/streaming_demo.py`, `tests/streaming/synth.py`, README section (depends on `#67`, `#69`).
+5. **Wave 4 — v2 Backlog (post-M4 / out of v1 scope):**
+   - [#51](https://github.com/etsi-ai/etsi-watchdog/issues/51) (rebalance safety), [#52](https://github.com/etsi-ai/etsi-watchdog/issues/52) (quantile sketches), [#53](https://github.com/etsi-ai/etsi-watchdog/issues/53) (count-based windows), [#56](https://github.com/etsi-ai/etsi-watchdog/issues/56) (DLQ), [#71](https://github.com/etsi-ai/etsi-watchdog/issues/71) (Prometheus), [#72](https://github.com/etsi-ai/etsi-watchdog/issues/72) (Schema Registry / Avro).
 
 ### Acceptance criteria
 

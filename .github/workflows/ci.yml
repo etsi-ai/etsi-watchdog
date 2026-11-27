@@ -30,7 +30,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e . pytest
+          # Pin pandas<3 until batch drift/psi.py updates np.issubdtype for StringDtype
+          pip install -e . "pandas<3" pytest
 
       - name: Run test suite
         run: |
@@ -52,8 +53,9 @@ jobs:
       - name: Install streaming dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install confluent-kafka redis msgpack
+          pip install -e ".[streaming]" "pandas<3" pytest
 
-      - name: Verify Python 3.8 importability
+      - name: Verify Python 3.8 importability and streaming unit tests
         run: |
           python -c "import confluent_kafka, redis, msgpack; print('Python 3.8 dependencies verified successfully')"
+          pytest tests/streaming -q
