@@ -3,7 +3,7 @@
 
 > **How to use this file.** It is the *only* document an engineer needs, plus read access to the repository. The Watchdog Task Plan, the three candidate proposals that were evaluated, and every verification result are digested or embedded below. Nothing here says "see another file".
 > **Intended path:** `docs/WORKFLOW_0.md`. Part II is the ADR; if maintainers prefer the usual layout, split Part II into `docs/adr/0001-streaming-architecture.md` and keep the rest here.
-> **Baseline:** `etsi-ai/etsi-watchdog`, branch `main` (originally verified at `82bc76b`; `main` subsequently advanced to `e467479` with PRs #47 and #48 merging M1 and reservoir stats), package v3.0.0. Appendix A/B numbers below are from the `82bc76b` verification run.
+> **Baseline:** `etsi-ai/etsi-watchdog`, branch `main` (originally verified at `82bc76b`; `main` advanced to `e467479` via PRs #47 and #48, and to `0ecfdc6` via PR #73), package v3.0.0. Appendix A/B numbers below are from the `82bc76b` verification run.
 > **Status:** Ratified by maintainer. All decisions ratified in §2.
 > **Rule:** no Workstream 1–8 code starts before the Gate (§20) is green.
 
@@ -886,19 +886,19 @@ Finish by running the Plan 7.3 integration test against the shipped compose.
 
 ## 20. Gate — Workflow 0 is done when all are true
 
-- [ ] **W0.1:** This document merged as `docs/WORKFLOW_0.md` (Part II summarized in `docs/adr/0001-streaming-architecture.md`)
+- [x] **W0.1:** This document merged as `docs/WORKFLOW_0.md` (Part II summarized in `docs/adr/0001-streaming-architecture.md`) — merged via PR #73 (`0ecfdc6`)
 - [x] **W0.2:** Maintainer ratification of J1–J6 and Q1–Q3 recorded in §2.1
-- [ ] **W0.3:** CI added (`.github/workflows/ci.yml`: Python 3.8 + 3.11) and `dependency-floor-probe` proves `pip install -e ".[streaming]" "pandas<3" pytest` (`confluent-kafka>=2.0.0`, `redis>=5.0.0`, `msgpack>=1.0.0`) + `pytest tests/streaming -q` pass on Python 3.8 (workflow added; PyPI 3.8 wheels verified, awaiting CI run + job B result recording)
+- [ ] **W0.3:** CI added (`.github/workflows/ci.yml`: Python 3.8 on `ubuntu-22.04` + 3.11 on `ubuntu-latest`) and `dependency-floor-probe` proves `pip install -e ".[streaming]" "pandas<3" pytest` (`confluent-kafka>=2.0.0`, `redis>=5.0.0`, `msgpack>=1.0.0`) + `pytest tests/streaming -q` pass on Python 3.8 (pinned `ubuntu-22.04` for Python 3.8 after `ubuntu-latest`/26.04 dropped 3.8; awaiting green CI run)
 - [x] **W0.4:** The eight §23 follow-up tickets (`#49–#56`) and downstream M2–M4/v2 tracking issues (`#65–#72`) are filed and linked
 - [x] **W0.5:** `tests/streaming/` skeleton with an `integration` marker (opt-in via `WATCHDOG_IT=1`) runs green
 
 ### 20.1 Workstream 0 Execution Plan & Contributor Runway
 
-Because `main` (`e467479`) already includes PR #47 (M1 core pipeline + `tests/streaming/`) and PR #48 (PR-11 reservoir stats), Workstream 0 Gate G0 unlocks contributor work across Workstreams 1–8 in the following order:
+Because `main` (`0ecfdc6`) already includes PR #47 (M1 core pipeline + `tests/streaming/`), PR #48 (PR-11 reservoir stats), and PR #73 (Workstream 0 ADR + CI matrix), Workstream 0 Gate G0 unlocks contributor work across Workstreams 1–8 in the following order:
 
-1. **Close Gate G0 (PR #73):**
-   - Trigger and verify `.github/workflows/ci.yml` (both the `3.8` / `3.11` core matrix and `dependency-floor-probe` running `pip install -e ".[streaming]" "pandas<3" pytest` + `pytest tests/streaming -q` on Python 3.8).
-   - Record the Python 3.8 probe outcome in §20 and merge PR #73 to `main`.
+1. **Close Gate G0 (W0.3 CI green):**
+   - Verify `.github/workflows/ci.yml` passes on GitHub Actions (both the `3.8` on `ubuntu-22.04` / `3.11` core matrix and `dependency-floor-probe` running `pip install -e ".[streaming]" "pandas<3" pytest` + `pytest tests/streaming -q` on Python 3.8).
+   - Record the Python 3.8 probe outcome in §20.
 2. **Wave 1 — Ready immediately after PR #73 merges (can run in parallel):**
    - **M1 / PR-11 follow-up fixes (§13 PR-4/PR-5, §15 PR-11):** Add missing `import numpy as np` in `ks_streaming.py`, forward `reservoir_size`/`seed` in `StreamingMonitor`/`WindowEngine`, wire boot-time `SlackNotifier` in `__main__.py`, pass `_commit_cb` in `kafka_consumer.py`, add `examples/streaming_smoke.sh`, and add multi-seed DKW coverage / Wasserstein relative-error tests.
    - **PR-6 (`[WS3-4 / M2]`, §14):** Implement `checkpoint.py` (`CheckpointWriter` atomic `write_batch`), replace the M1 stub in `StreamingMonitor.checkpoint()`, and implement Kafka `on_assign` seek-from-state + `offset_resets`.

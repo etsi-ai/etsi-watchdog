@@ -25,6 +25,7 @@ def generate_data():
 
 def test_drift_check():
     print("\n===== Running DriftCheck ====")
+    os.makedirs("logs", exist_ok=True)
     ref, live = generate_data()
 
     check = DriftCheck(ref)
