@@ -9,11 +9,15 @@ on:
 jobs:
   test:
     name: Core Test Suite (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.11"]
+        include:
+          - python-version: "3.8"
+            os: ubuntu-22.04
+          - python-version: "3.11"
+            os: ubuntu-latest
 
     env:
       MPLBACKEND: Agg
@@ -39,7 +43,7 @@ jobs:
 
   dependency-floor-probe:
     name: Streaming Dependency Floor Probe (Python 3.8)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Check out repository
